@@ -1,52 +1,119 @@
 <!DOCTYPE html>
 <html>
     <head>
-        <title>Live Transcription</title>
+        <title>Live Transcription + 60db TTS</title>
     </head>
     <body>
         <h1>Transcribe Audio With FastAPI</h1>
         <p id="status">Connection status will go here</p>
         <p id="transcript"></p>
 
+        <hr />
+
+        <h1>Speak Text With 60db</h1>
+        <textarea id="tts-text" rows="3" cols="50" placeholder="Type something to synthesize..."></textarea>
+        <br />
+        <button id="tts-speak">Speak</button>
+        <span id="tts-status"></span>
+
         <script>
-               navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
-            if (!MediaRecorder.isTypeSupported('audio/webm'))
-                return alert('Browser not supported')
+            // --- Speech-to-text (Deepgram via /listen) -----------------------
+            navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+                if (!MediaRecorder.isTypeSupported('audio/webm'))
+                    return alert('Browser not supported')
 
-            const mediaRecorder = new MediaRecorder(stream, {
-                mimeType: 'audio/webm',
-            })
+                const mediaRecorder = new MediaRecorder(stream, {
+                    mimeType: 'audio/webm',
+                })
 
-            const socket = new WebSocket('ws://localhost:8000/listen')
+                const socket = new WebSocket('ws://localhost:8000/listen')
 
-            socket.onopen = () => {
-                document.querySelector('#status').textContent = 'Connected'
-                console.log({ event: 'onopen' })
-                mediaRecorder.addEventListener('dataavailable', async (event) => {
-                    if (event.data.size > 0 && socket.readyState == 1) {
-                        socket.send(event.data)
-                    }
-            })
-            mediaRecorder.start(250)
-            }
-
-            socket.onmessage = (message) => {
-                const received = message.data
-                if (received) {
-                    console.log(received)
-                    document.querySelector('#transcript').textContent += ' ' + received
+                socket.onopen = () => {
+                    document.querySelector('#status').textContent = 'Connected'
+                    console.log({ event: 'onopen' })
+                    mediaRecorder.addEventListener('dataavailable', async (event) => {
+                        if (event.data.size > 0 && socket.readyState == 1) {
+                            socket.send(event.data)
+                        }
+                    })
+                    mediaRecorder.start(250)
                 }
-           }
 
-           socket.onclose = () => {
-            console.log({ event: 'onclose' })
-        }
+                socket.onmessage = (message) => {
+                    const received = message.data
+                    if (received) {
+                        console.log(received)
+                        document.querySelector('#transcript').textContent += ' ' + received
+                    }
+                }
 
-            socket.onerror = (error) => {
-                console.log({ event: 'onerror', error })
+                socket.onclose = () => {
+                    console.log({ event: 'onclose' })
+                }
+
+                socket.onerror = (error) => {
+                    console.log({ event: 'onerror', error })
+                }
+            })
+
+            // --- Text-to-speech (60db via /speak) ----------------------------
+            // The server streams raw 16-bit signed PCM (mono) frames, then a
+            // text marker. We accumulate the frames and play them through the
+            // Web Audio API once the utterance is complete.
+            const SAMPLE_RATE = {{ sample_rate }}
+            const TTS_END_MARKER = '__end__'
+
+            const ttsSocket = new WebSocket('ws://localhost:8000/speak')
+            ttsSocket.binaryType = 'arraybuffer'
+            let pcmChunks = []
+
+            ttsSocket.onopen = () => {
+                document.querySelector('#tts-status').textContent = 'TTS ready'
             }
 
-           })
+            ttsSocket.onmessage = (message) => {
+                if (typeof message.data === 'string') {
+                    if (message.data === TTS_END_MARKER) {
+                        playPcm(pcmChunks)
+                        pcmChunks = []
+                        document.querySelector('#tts-status').textContent = 'TTS ready'
+                    }
+                    return
+                }
+                pcmChunks.push(new Int16Array(message.data))
+            }
+
+            ttsSocket.onerror = (error) => console.log({ event: 'tts-onerror', error })
+
+            document.querySelector('#tts-speak').addEventListener('click', () => {
+                const text = document.querySelector('#tts-text').value
+                if (!text.trim() || ttsSocket.readyState != 1) return
+                pcmChunks = []
+                document.querySelector('#tts-status').textContent = 'Synthesizing...'
+                ttsSocket.send(text)
+            })
+
+            function playPcm(chunks) {
+                const total = chunks.reduce((n, c) => n + c.length, 0)
+                if (total === 0) return
+
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+                const buffer = audioCtx.createBuffer(1, total, SAMPLE_RATE)
+                const channel = buffer.getChannelData(0)
+
+                let offset = 0
+                for (const chunk of chunks) {
+                    for (let i = 0; i < chunk.length; i++) {
+                        // Int16 [-32768, 32767] -> Float32 [-1, 1]
+                        channel[offset++] = chunk[i] / 32768
+                    }
+                }
+
+                const source = audioCtx.createBufferSource()
+                source.buffer = buffer
+                source.connect(audioCtx.destination)
+                source.start()
+            }
         </script>
     </body>
 </html>

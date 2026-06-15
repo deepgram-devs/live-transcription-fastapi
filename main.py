@@ -1,56 +1,80 @@
-from fastapi import FastAPI, Request, WebSocket
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from typing import Dict, Callable
-from deepgram import Deepgram
-from dotenv import load_dotenv
-import os
 
-load_dotenv()
+import config
+from providers.deepgram_stt import DeepgramSTT
+from providers.sixtydb_tts import SixtyDbTTS
 
 app = FastAPI()
-
-dg_client = Deepgram(os.getenv('DEEPGRAM_API_KEY'))
-
 templates = Jinja2Templates(directory="templates")
 
-async def process_audio(fast_socket: WebSocket):
-    async def get_transcript(data: Dict) -> None:
-        if 'channel' in data:
-            transcript = data['channel']['alternatives'][0]['transcript']
-        
-            if transcript:
-                await fast_socket.send_text(transcript)
+# Voice providers, wired once and used through their neutral interfaces.
+stt_provider = DeepgramSTT(config.DEEPGRAM_API_KEY)
+tts_provider = SixtyDbTTS(
+    api_key=config.SIXTYDB_API_KEY,
+    ws_url=config.SIXTYDB_WS_URL,
+    voice_id=config.SIXTYDB_VOICE_ID,
+    sample_rate=config.SIXTYDB_SAMPLE_RATE,
+    audio_encoding=config.SIXTYDB_AUDIO_ENCODING,
+    speed=config.SIXTYDB_SPEED,
+    stability=config.SIXTYDB_STABILITY,
+    similarity=config.SIXTYDB_SIMILARITY,
+)
 
-    deepgram_socket = await connect_to_deepgram(get_transcript)
+# Sentinel sent over /speak to mark the end of one synthesized utterance.
+TTS_END_MARKER = "__end__"
 
-    return deepgram_socket
 
-async def connect_to_deepgram(transcript_received_handler: Callable[[Dict], None]):
-    try:
-        socket = await dg_client.transcription.live({'punctuate': True, 'interim_results': False})
-        socket.registerHandler(socket.event.CLOSE, lambda c: print(f'Connection closed with code {c}.'))
-        socket.registerHandler(socket.event.TRANSCRIPT_RECEIVED, transcript_received_handler)
-        
-        return socket
-    except Exception as e:
-        raise Exception(f'Could not open socket: {e}')
- 
 @app.get("/", response_class=HTMLResponse)
 def get(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(
+        "index.html",
+        {"request": request, "sample_rate": config.SIXTYDB_SAMPLE_RATE},
+    )
+
 
 @app.websocket("/listen")
-async def websocket_endpoint(websocket: WebSocket):
+async def listen(websocket: WebSocket):
+    """Speech-to-text: browser streams mic audio in, transcripts stream out."""
     await websocket.accept()
 
     try:
-        deepgram_socket = await process_audio(websocket) 
+        session = await stt_provider.connect(websocket.send_text)
 
         while True:
             data = await websocket.receive_bytes()
-            deepgram_socket.send(data)
+            session.send(data)
+    except WebSocketDisconnect:
+        pass
     except Exception as e:
-        raise Exception(f'Could not process audio: {e}')
+        raise Exception(f"Could not process audio: {e}")
+    finally:
+        await websocket.close()
+
+
+@app.websocket("/speak")
+async def speak(websocket: WebSocket):
+    """Text-to-speech: browser sends text, raw audio frames stream back.
+
+    Audio frames are sent as binary messages; a trailing text marker signals the
+    end of each utterance so the client knows when to play it back.
+    """
+    await websocket.accept()
+
+    try:
+        while True:
+            text = await websocket.receive_text()
+            if not text.strip():
+                continue
+
+            async for frame in tts_provider.synthesize(text):
+                await websocket.send_bytes(frame)
+
+            await websocket.send_text(TTS_END_MARKER)
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        raise Exception(f"Could not synthesize speech: {e}")
     finally:
         await websocket.close()
