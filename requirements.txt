@@ -1,38 +1,42 @@
-aiohttp==3.8.1
-aiosignal==1.2.0
-anyio==3.5.0
-asgiref==3.5.0
-async-timeout==4.0.2
-attrs==21.4.0
-certifi==2021.10.8
-charset-normalizer==2.0.12
-click==8.0.4
+# Pinned for Python 3.12 (verified on Windows + Linux).
+#
+# Notable changes from the original 2022 pins:
+#   - Dropped uvloop (no Windows wheels; uvicorn falls back to asyncio).
+#   - pydantic 1.x -> 2.x, fastapi/starlette/jinja2 bumped to versions that
+#     build on 3.12. fastapi is held at 0.103.2 / starlette 0.27.0 because the
+#     app uses the classic TemplateResponse(name, context) signature that
+#     newer Starlette removed.
+#   - deepgram-sdk stays on 0.2.4: providers/deepgram_stt.py targets that API.
+
+# --- Direct dependencies ---
+fastapi==0.103.2
+uvicorn==0.49.0
+Jinja2==3.1.6
+python-dotenv==1.2.2
+python-multipart==0.0.32
+websockets==16.0
 deepgram-sdk==0.2.4
-dnspython==2.2.0
-email-validator==1.1.3
-fastapi==0.74.1
-frozenlist==1.3.0
-h11==0.13.0
-httptools==0.2.0
-idna==3.3
-itsdangerous==2.1.0
-Jinja2==3.0.3
-MarkupSafe==2.1.0
-multidict==6.0.2
-orjson==3.6.7
-pydantic==1.9.0
-python-dotenv==0.19.2
-python-multipart==0.0.5
-PyYAML==5.4.1
-requests==2.27.1
-six==1.16.0
-sniffio==1.2.0
-starlette==0.17.1
-typing_extensions==4.1.1
-ujson==4.3.0
-urllib3==1.26.8
-uvicorn==0.15.0
-uvloop==0.16.0
-watchgod==0.7
-websockets==10.2
-yarl==1.7.2
+
+# --- Transitive dependencies (pinned for reproducibility) ---
+aiohappyeyeballs==2.6.2
+aiohttp==3.14.1
+aiosignal==1.4.0
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anyio==3.7.1
+attrs==26.1.0
+click==8.4.1
+colorama==0.4.6
+frozenlist==1.8.0
+h11==0.16.0
+idna==3.18
+MarkupSafe==3.0.3
+multidict==6.7.1
+propcache==0.5.2
+pydantic==2.13.4
+pydantic_core==2.46.4
+sniffio==1.3.1
+starlette==0.27.0
+typing-inspection==0.4.2
+typing_extensions==4.15.0
+yarl==1.24.2
