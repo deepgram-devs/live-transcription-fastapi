@@ -1,3 +1,6 @@
+> [!WARNING]
+> **This repository is retired and no longer maintained.** Please use the maintained starter instead: [deepgram-starters/fastapi-live-transcription](https://github.com/deepgram-starters/fastapi-live-transcription).
+
 # Live Transcription With Python and FastAPI
 
 To run this project create a virtual environment by running the below commands. You can learn more about setting up a virtual environment in this [article](https://developers.deepgram.com/blog/2022/02/python-virtual-environments/). 
